@@ -5,10 +5,11 @@ import { Card } from "@/components/ui/card"
 
 interface WebcamMonitorProps {
   onFaceDetectionStatus: (detected: boolean, multipleFaces: boolean, faceCount: number) => void;
+  onFaceDetectionReady: (ready: boolean) => void;
   isActive: boolean;
 }
 
-export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: WebcamMonitorProps) {
+export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionReady, isActive }: WebcamMonitorProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [cameraActive, setCameraActive] = useState(false)
@@ -16,6 +17,7 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
   const [faceApiLoaded, setFaceApiLoaded] = useState(false)
   const [multipleFaces, setMultipleFaces] = useState(false)
   const [faceCount, setFaceCount] = useState(0)
+  const [initialCheckDone, setInitialCheckDone] = useState(false)
 
   // Load face-api.js script
   useEffect(() => {
@@ -67,6 +69,16 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
       loadModels()
     }
   }, [faceApiLoaded, cameraActive, faceDetectionReady])
+  
+  // Notify parent component about face detection readiness
+  useEffect(() => {
+    // Only notify when we've completed at least one detection cycle
+    if (faceDetectionReady && initialCheckDone) {
+      onFaceDetectionReady(true)
+    } else {
+      onFaceDetectionReady(false)
+    }
+  }, [faceDetectionReady, initialCheckDone, onFaceDetectionReady])
   
   // Start webcam
   const startCamera = async () => {
@@ -136,6 +148,11 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
           options
         ).withFaceLandmarks().withFaceExpressions()
         
+        // Mark initial check as done after first detection
+        if (!initialCheckDone) {
+          setInitialCheckDone(true)
+        }
+        
         // Get number of faces detected
         const detectedFaceCount = detections.length
         setFaceCount(detectedFaceCount)
@@ -203,7 +220,7 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
     checkFace()
     
     return () => clearInterval(faceDetectionInterval)
-  }, [faceDetectionReady, cameraActive, onFaceDetectionStatus])
+  }, [faceDetectionReady, cameraActive, onFaceDetectionStatus, initialCheckDone])
   
   return (
     <Card className="overflow-hidden">
@@ -230,7 +247,15 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
         )}
         {cameraActive && !faceDetectionReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
-            Loading face detection...
+            <div className="text-center">
+              <div className="animate-pulse mb-3">Loading face detection models...</div>
+              <div className="text-xs">This may take a few moments</div>
+            </div>
+          </div>
+        )}
+        {faceDetectionReady && !initialCheckDone && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
+            Initializing face detection...
           </div>
         )}
         {multipleFaces && (
@@ -243,7 +268,9 @@ export default function WebcamMonitor({ onFaceDetectionStatus, isActive }: Webca
         <div className="flex justify-between">
           <div>Your face must be the only one visible during the exam</div>
           <div>
-            {faceDetectionReady && <span className="text-green-500">Face tracking active</span>}
+            {!faceDetectionReady && <span className="text-amber-500">Loading face detection...</span>}
+            {faceDetectionReady && !initialCheckDone && <span className="text-amber-500">Initializing...</span>}
+            {faceDetectionReady && initialCheckDone && <span className="text-green-500">Face tracking active</span>}
           </div>
         </div>
       </div>

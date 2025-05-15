@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { Clock, User, LogOut, AlertTriangle } from "lucide-react"
+import { Clock, User, LogOut, AlertTriangle, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import WebcamMonitor from "@/components/exam/WebcamMonitor"
 
@@ -56,6 +56,8 @@ export default function ExamPage() {
   const [warningDialog, setWarningDialog] = useState(false)
   const [cheatingLogs, setCheatingLogs] = useState<string[]>([])
   const [startExamDialog, setStartExamDialog] = useState(true)
+  const [faceDetectionReady, setFaceDetectionReady] = useState(false)
+  const [examStarted, setExamStarted] = useState(false)
   
   // Define logCheatingAttempt first before any useEffect hooks
   const logCheatingAttempt = useCallback((message: string) => {
@@ -66,14 +68,22 @@ export default function ExamPage() {
     setWarningCount(prev => prev + 1)
   }, [])
   
-  // Start exam without fullscreen mode
+  // Start exam (first activates face detection, then starts exam when ready)
+  const prepareExam = () => {
+    setStartExamDialog(false)
+  }
+  
+  // Actually start the exam (called when face detection is ready)
   const startExam = () => {
-    setStartExamDialog(false);
-  };
+    if (!faceDetectionReady) {
+      return
+    }
+    setExamStarted(true)
+  }
   
   // Anti-cheating: Timer countdown
   useEffect(() => {
-    if (!startExamDialog && timeLeft > 0) {
+    if (examStarted && timeLeft > 0) {
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -88,7 +98,12 @@ export default function ExamPage() {
       
       return () => clearInterval(timer)
     }
-  }, [startExamDialog, timeLeft])
+  }, [examStarted, timeLeft])
+  
+  // Handle face detection readiness
+  const handleFaceDetectionReady = (ready: boolean) => {
+    setFaceDetectionReady(ready)
+  }
   
   // Handle face detection status from WebcamMonitor
   const handleFaceDetectionStatus = (faceDetected: boolean, multipleFaces: boolean, faceCount: number) => {
@@ -173,8 +188,8 @@ export default function ExamPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="flex items-center gap-4">
-              <Button onClick={startExam} className="w-full">
-                Start Exam
+              <Button onClick={prepareExam} className="w-full">
+                Prepare Exam
               </Button>
             </div>
           </div>
@@ -198,112 +213,171 @@ export default function ExamPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Header */}
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-4 shadow-sm">
-        <div className="flex items-center">
-          <User className="mr-2 h-5 w-5" />
-          <span className="font-medium">Student Exam Portal</span>
-        </div>
-
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center text-amber-500">
-            <Clock className="mr-1 h-5 w-5" />
-            <span className="font-medium">{formatTime(timeLeft)}</span>
-          </div>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => {
-              if (confirm("Are you sure you want to end the exam?")) {
-                handleSubmit()
-              }
-            }}
-          >
-            <LogOut className="mr-2 h-4 w-4" /> End Exam
-          </Button>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-3">
-        {/* Left Side - Webcam */}
-        <div className="relative space-y-4">
-          {/* Using the WebcamMonitor component */}
-          <WebcamMonitor 
-            onFaceDetectionStatus={handleFaceDetectionStatus} 
-            isActive={!startExamDialog} 
-          />
-
-          <Card>
-            <div className="p-4">
-              <h3 className="mb-2 font-medium">Exam Progress</h3>
-              <Progress
-                value={
-                  (Object.keys(selectedAnswers).length / questions.length) * 100
-                }
-                className="h-2"
-              />
-              <div className="mt-2 text-sm text-muted-foreground">
-                <span className="font-medium">
-                  {Object.keys(selectedAnswers).length}/{questions.length}
-                </span>{" "}
-                questions answered
-              </div>
+      {/* Pre-exam face detection setup screen */}
+      {!startExamDialog && !examStarted && (
+        <div className="min-h-screen flex flex-col">
+          <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-4 shadow-sm">
+            <div className="flex items-center">
+              <User className="mr-2 h-5 w-5" />
+              <span className="font-medium">Exam Setup</span>
             </div>
-          </Card>
-        </div>
-
-        {/* Right Side - Questions */}
-        <div className="col-span-1 space-y-4 md:col-span-2">
-          <Card className="min-h-[60vh]">
-            <div className="flex flex-col p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-semibold">
-                  Question {currentQuestion + 1} of {questions.length}
-                </h2>
+          </header>
+          
+          <div className="flex-1 flex flex-col items-center justify-center p-4">
+            <div className="w-full max-w-lg space-y-8">
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold mb-2">Face Detection Setup</h2>
+                <p className="text-gray-600">
+                  We need to verify your camera is working properly before starting the exam.
+                  Please make sure only your face is visible in the camera.
+                </p>
               </div>
-
-              <div className="mb-8">
-                <p className="text-lg">{questions[currentQuestion].question}</p>
-              </div>
-
-              <div className="mb-8">
-                <RadioGroup
-                  value={selectedAnswers[currentQuestion] || ""}
-                  onValueChange={(value) => handleSelectAnswer(value)}
-                  className="space-y-3"
+              
+              <div className="space-y-6">
+                <WebcamMonitor 
+                  onFaceDetectionStatus={handleFaceDetectionStatus} 
+                  onFaceDetectionReady={handleFaceDetectionReady}
+                  isActive={!startExamDialog} 
+                />
+                
+                <div className="bg-gray-100 p-4 rounded-lg">
+                  <h3 className="font-medium mb-2">System Status</h3>
+                  <ul className="space-y-2">
+                    <li className="flex items-center">
+                      <div className={`w-3 h-3 rounded-full mr-2 ${faceDetectionReady ? 'bg-green-500' : 'bg-amber-500'}`}></div>
+                      <span>Face Detection: {faceDetectionReady ? 'Ready' : 'Loading...'}</span>
+                    </li>
+                  </ul>
+                </div>
+                
+                <Button 
+                  className="w-full" 
+                  disabled={!faceDetectionReady}
+                  onClick={startExam}
                 >
-                  {questions[currentQuestion].options.map((option) => (
-                    <div
-                      key={option}
-                      className="flex items-center space-x-2 rounded-lg border p-3 transition-colors hover:bg-gray-50"
-                    >
-                      <RadioGroupItem value={option} id={option} />
-                      <Label htmlFor={option} className="flex-grow cursor-pointer">
-                        {option}
-                      </Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-              </div>
-
-              <div className="mt-auto flex justify-between pt-4">
-                <Button
-                  variant="outline"
-                  onClick={handlePrevQuestion}
-                  disabled={currentQuestion === 0}
-                >
-                  Previous
+                  {!faceDetectionReady && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {faceDetectionReady ? 'Start Exam' : 'Waiting for face detection...'}
                 </Button>
-                {currentQuestion === questions.length - 1 ? (
-                  <Button onClick={handleSubmit}>Submit Exam</Button>
-                ) : (
-                  <Button onClick={handleNextQuestion}>Next</Button>
-                )}
               </div>
             </div>
-          </Card>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Main exam view */}
+      {examStarted && (
+        <>
+          {/* Header */}
+          <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-4 shadow-sm">
+            <div className="flex items-center">
+              <User className="mr-2 h-5 w-5" />
+              <span className="font-medium">Student Exam Portal</span>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center text-amber-500">
+                <Clock className="mr-1 h-5 w-5" />
+                <span className="font-medium">{formatTime(timeLeft)}</span>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  if (confirm("Are you sure you want to end the exam?")) {
+                    handleSubmit()
+                  }
+                }}
+              >
+                <LogOut className="mr-2 h-4 w-4" /> End Exam
+              </Button>
+            </div>
+          </header>
+
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-3">
+            {/* Left Side - Webcam */}
+            <div className="relative space-y-4">
+              {/* Using the WebcamMonitor component */}
+              <WebcamMonitor 
+                onFaceDetectionStatus={handleFaceDetectionStatus} 
+                onFaceDetectionReady={handleFaceDetectionReady}
+                isActive={!startExamDialog} 
+              />
+
+              <Card>
+                <div className="p-4">
+                  <h3 className="mb-2 font-medium">Exam Progress</h3>
+                  <Progress
+                    value={
+                      (Object.keys(selectedAnswers).length / questions.length) * 100
+                    }
+                    className="h-2"
+                  />
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    <span className="font-medium">
+                      {Object.keys(selectedAnswers).length}/{questions.length}
+                    </span>{" "}
+                    questions answered
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Right Side - Questions */}
+            <div className="col-span-1 space-y-4 md:col-span-2">
+              <Card className="min-h-[60vh]">
+                <div className="flex flex-col p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-xl font-semibold">
+                      Question {currentQuestion + 1} of {questions.length}
+                    </h2>
+                  </div>
+
+                  <div className="mb-8">
+                    <p className="text-lg">{questions[currentQuestion].question}</p>
+                  </div>
+
+                  <div className="mb-8">
+                    <RadioGroup
+                      value={selectedAnswers[currentQuestion] || ""}
+                      onValueChange={(value) => handleSelectAnswer(value)}
+                      className="space-y-3"
+                    >
+                      {questions[currentQuestion].options.map((option) => (
+                        <div
+                          key={option}
+                          className="flex items-center space-x-2 rounded-lg border p-3 transition-colors hover:bg-gray-50"
+                        >
+                          <RadioGroupItem value={option} id={option} />
+                          <Label htmlFor={option} className="flex-grow cursor-pointer">
+                            {option}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  </div>
+
+                  <div className="mt-auto flex justify-between pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={handlePrevQuestion}
+                      disabled={currentQuestion === 0}
+                    >
+                      Previous
+                    </Button>
+                    {currentQuestion === questions.length - 1 ? (
+                      <Button onClick={handleSubmit}>Submit Exam</Button>
+                    ) : (
+                      <Button onClick={handleNextQuestion}>Next</Button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
