@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { Clock, User, LogOut, AlertTriangle, Loader2, CheckCircle } from "lucide-react"
+import { Clock, User, LogOut, AlertTriangle, Loader2, CheckCircle, Maximize, Minimize } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import WebcamMonitor from "@/components/exam/WebcamMonitor"
 
@@ -62,6 +62,9 @@ export default function ExamPage() {
   const [examScore, setExamScore] = useState(0)
   const [resultsDialog, setResultsDialog] = useState(false)
   const [cameraOff, setCameraOff] = useState(false)
+  const [lastVisibilityState, setLastVisibilityState] = useState("")
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [fullscreenExitAttempts, setFullscreenExitAttempts] = useState(0)
   
   // Define logCheatingAttempt first before any useEffect hooks
   const logCheatingAttempt = useCallback((message: string) => {
@@ -71,6 +74,91 @@ export default function ExamPage() {
     setCheatingLogs(prev => [...prev, logMessage])
     setWarningCount(prev => prev + 1)
   }, [])
+  
+  // Function to enter fullscreen mode
+  const enterFullscreen = useCallback(() => {
+    if (containerRef.current) {
+      try {
+        if (containerRef.current.requestFullscreen) {
+          containerRef.current.requestFullscreen().catch(err => {
+            console.error(`Error attempting to enable fullscreen: ${err.message}`);
+          });
+        } else if ((containerRef.current as any).webkitRequestFullscreen) {
+          (containerRef.current as any).webkitRequestFullscreen();
+        } else if ((containerRef.current as any).mozRequestFullScreen) {
+          (containerRef.current as any).mozRequestFullScreen();
+        } else if ((containerRef.current as any).msRequestFullscreen) {
+          (containerRef.current as any).msRequestFullscreen();
+        }
+      } catch (err) {
+        console.error("Failed to enter fullscreen:", err);
+      }
+    }
+  }, []);
+  
+  // Function to exit fullscreen mode
+  const exitFullscreen = useCallback(() => {
+    try {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else if ((document as any).mozCancelFullScreen) {
+        (document as any).mozCancelFullScreen();
+      } else if ((document as any).msExitFullscreen) {
+        (document as any).msExitFullscreen();
+      }
+    } catch (err) {
+      console.error("Failed to exit fullscreen:", err);
+    }
+  }, []);
+  
+  // Handle fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isDocFullscreen = document.fullscreenElement !== null || 
+                             (document as any).webkitFullscreenElement !== null || 
+                             (document as any).mozFullScreenElement !== null || 
+                             (document as any).msFullscreenElement !== null;
+      
+      setIsFullscreen(isDocFullscreen);
+      
+      // If user exits fullscreen and exam is in progress, log it and try to re-enter
+      if (!isDocFullscreen && examStarted && !examCompleted) {
+        logCheatingAttempt("Attempted to exit fullscreen mode");
+        setWarning("Exiting fullscreen mode is not allowed during the exam");
+        setWarningDialog(true);
+        
+        const newAttemptCount = fullscreenExitAttempts + 1;
+        setFullscreenExitAttempts(newAttemptCount);
+        
+        // If user has tried to exit fullscreen multiple times, warn them
+        if (newAttemptCount >= 3) {
+          setWarning("You have exited fullscreen mode multiple times. This will significantly affect your exam integrity score.");
+          setWarningDialog(true);
+        }
+        
+        // Try to re-enter fullscreen after a short delay
+        setTimeout(() => {
+          if (examStarted && !examCompleted) {
+            enterFullscreen();
+          }
+        }, 1000);
+      }
+    };
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, [examStarted, examCompleted, fullscreenExitAttempts, enterFullscreen, logCheatingAttempt]);
   
   // Start exam (first activates face detection, then starts exam when ready)
   const prepareExam = () => {
@@ -82,6 +170,8 @@ export default function ExamPage() {
     if (!faceDetectionReady) {
       return
     }
+    // Enter fullscreen mode before starting exam
+    enterFullscreen();
     setExamStarted(true)
   }
   
@@ -103,6 +193,123 @@ export default function ExamPage() {
       return () => clearInterval(timer)
     }
   }, [examStarted, timeLeft, examCompleted])
+  
+  // Anti-cheating: Prevent right-click and keyboard shortcuts
+  useEffect(() => {
+    if (!examStarted || examCompleted) return
+    
+    const preventRightClick = (e: MouseEvent) => {
+      e.preventDefault()
+      logCheatingAttempt('Attempted to use right-click menu')
+      setWarning('Right-click menu is disabled during the exam')
+      setWarningDialog(true)
+      return false
+    }
+    
+    const preventKeyboardShortcuts = (e: KeyboardEvent) => {
+      // Detect Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+P, etc.
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase()
+        if (['c', 'v', 'x', 'p', 'a', 's', 'u'].includes(key)) {
+          e.preventDefault()
+          logCheatingAttempt(`Attempted keyboard shortcut: Ctrl+${key.toUpperCase()}`)
+          setWarning(`Keyboard shortcut Ctrl+${key.toUpperCase()} is disabled during the exam`)
+          setWarningDialog(true)
+          return false
+        }
+      }
+      
+      // Prevent PrintScreen
+      if (e.key === 'PrintScreen') {
+        e.preventDefault()
+        logCheatingAttempt('Attempted to use PrintScreen')
+        setWarning('Screenshot capture is disabled during the exam')
+        setWarningDialog(true)
+        return false
+      }
+      
+      // Prevent Alt+Tab
+      if (e.altKey && e.key === 'Tab') {
+        e.preventDefault()
+        logCheatingAttempt('Attempted to use Alt+Tab')
+        setWarning('Switching applications is not allowed during the exam')
+        setWarningDialog(true)
+        return false
+      }
+      
+      // Prevent Escape key from exiting fullscreen
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault()
+        logCheatingAttempt('Attempted to use Escape key to exit fullscreen')
+        setWarning('Escape key is disabled during the exam')
+        setWarningDialog(true)
+        return false
+      }
+      
+      // Prevent F11 key (another way to toggle fullscreen)
+      if (e.key === 'F11') {
+        e.preventDefault()
+        logCheatingAttempt('Attempted to use F11 key to toggle fullscreen')
+        setWarning('F11 key is disabled during the exam')
+        setWarningDialog(true)
+        return false
+      }
+    }
+    
+    // Add event listeners to block right-click and keyboard shortcuts
+    document.addEventListener('contextmenu', preventRightClick)
+    document.addEventListener('keydown', preventKeyboardShortcuts)
+    
+    // Remove event listeners when component unmounts or exam is completed
+    return () => {
+      document.removeEventListener('contextmenu', preventRightClick)
+      document.removeEventListener('keydown', preventKeyboardShortcuts)
+    }
+  }, [examStarted, examCompleted, isFullscreen, logCheatingAttempt])
+  
+  // Anti-cheating: Tab switching detection
+  useEffect(() => {
+    if (!examStarted || examCompleted) return
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && lastVisibilityState !== 'hidden') {
+        logCheatingAttempt(`Tab switched at ${new Date().toLocaleTimeString()}`)
+        setWarning('Tab switching detected. This will be recorded as a potential cheating attempt.')
+        setWarningDialog(true)
+      }
+      setLastVisibilityState(document.visibilityState)
+    }
+    
+    const handleBlur = () => {
+      logCheatingAttempt(`Window lost focus at ${new Date().toLocaleTimeString()}`)
+      setWarning('Window focus lost. This will be recorded as a potential cheating attempt.')
+      setWarningDialog(true)
+    }
+    
+    // Add event listeners for tab switching and window focus
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('blur', handleBlur)
+    
+    // Prevent browser closing or refreshing
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Cancel the event and show confirmation dialog
+      e.preventDefault()
+      // Chrome requires returnValue to be set
+      e.returnValue = ''
+      
+      logCheatingAttempt('Attempted to close or refresh the browser')
+      return 'Are you sure you want to leave the exam? Your progress will be lost.'
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    // Remove event listeners when component unmounts or exam is completed
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [examStarted, examCompleted, lastVisibilityState, logCheatingAttempt])
   
   // Handle face detection readiness
   const handleFaceDetectionReady = (ready: boolean) => {
@@ -147,6 +354,10 @@ export default function ExamPage() {
   
   // Return to home page
   const handleReturnHome = () => {
+    // Exit fullscreen if active
+    if (isFullscreen) {
+      exitFullscreen()
+    }
     router.push("/")
   }
   
@@ -157,6 +368,11 @@ export default function ExamPage() {
     
     // Turn off camera
     setCameraOff(true)
+    
+    // Exit fullscreen mode
+    if (isFullscreen) {
+      exitFullscreen()
+    }
     
     // Calculate score
     let score = 0
@@ -176,7 +392,8 @@ export default function ExamPage() {
       totalQuestions: questions.length,
       cheatingLogs,
       warningCount,
-      answers: selectedAnswers
+      answers: selectedAnswers,
+      fullscreenExits: fullscreenExitAttempts
     }
     
     console.log("Exam results:", results)
@@ -204,6 +421,16 @@ export default function ExamPage() {
             <DialogDescription>
               Please ensure you're in a quiet environment and your camera is working.
               The exam has a time limit of 30 minutes.
+              <div className="mt-4 text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                <p className="font-bold">Important:</p>
+                <ul className="list-disc pl-5 mt-1 space-y-1">
+                  <li>The exam will run in fullscreen mode</li>
+                  <li>Right-clicking will be disabled during the exam</li>
+                  <li>Switching tabs will be detected and reported</li>
+                  <li>Keyboard shortcuts (Ctrl+C, Ctrl+V, etc.) will be disabled</li>
+                  <li>Your face must be visible at all times</li>
+                </ul>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -252,6 +479,13 @@ export default function ExamPage() {
                   </div>
                 )}
                 
+                {fullscreenExitAttempts > 0 && (
+                  <div className="mt-2 text-sm text-amber-500 bg-amber-50 p-3 rounded">
+                    <AlertTriangle className="inline-block mr-1 h-4 w-4" />
+                    Fullscreen mode was exited {fullscreenExitAttempts} time{fullscreenExitAttempts !== 1 ? 's' : ''}.
+                  </div>
+                )}
+                
                 <div className="mt-4">
                   Thank you for completing the exam. Your camera has been turned off.
                 </div>
@@ -284,6 +518,10 @@ export default function ExamPage() {
                   We need to verify your camera is working properly before starting the exam.
                   Please make sure only your face is visible in the camera.
                 </p>
+                <p className="mt-2 text-amber-600 text-sm">
+                  <AlertTriangle className="inline-block mr-1 h-4 w-4" />
+                  The exam will start in fullscreen mode. Please close any unnecessary applications.
+                </p>
               </div>
               
               <div className="space-y-6">
@@ -312,7 +550,7 @@ export default function ExamPage() {
                   {!faceDetectionReady && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
-                  {faceDetectionReady ? 'Start Exam' : 'Waiting for face detection...'}
+                  {faceDetectionReady ? 'Start Exam in Fullscreen' : 'Waiting for face detection...'}
                 </Button>
               </div>
             </div>
@@ -335,6 +573,18 @@ export default function ExamPage() {
                 <Clock className="mr-1 h-5 w-5" />
                 <span className="font-medium">{formatTime(timeLeft)}</span>
               </div>
+              
+              <div className="hidden md:flex items-center text-blue-500">
+                {isFullscreen ? (
+                  <Minimize className="mr-1 h-5 w-5" />
+                ) : (
+                  <Maximize className="mr-1 h-5 w-5 animate-pulse" />
+                )}
+                <span className="text-xs font-medium">
+                  {isFullscreen ? 'Fullscreen Mode' : 'Please enter fullscreen'}
+                </span>
+              </div>
+              
               <Button 
                 variant="outline" 
                 size="sm"
@@ -377,6 +627,26 @@ export default function ExamPage() {
                   </div>
                 </div>
               </Card>
+              
+              {!isFullscreen && (
+                <Card className="bg-amber-50 border-amber-200">
+                  <div className="p-4">
+                    <div className="flex items-center space-x-2 text-amber-600">
+                      <AlertTriangle className="h-5 w-5" />
+                      <h3 className="font-medium">Fullscreen Required</h3>
+                    </div>
+                    <p className="mt-2 text-sm text-amber-700">
+                      Please enter fullscreen mode for the exam.
+                    </p>
+                    <Button 
+                      className="mt-2 w-full bg-amber-600 hover:bg-amber-700"
+                      onClick={enterFullscreen}
+                    >
+                      <Maximize className="mr-2 h-4 w-4" /> Enter Fullscreen
+                    </Button>
+                  </div>
+                </Card>
+              )}
             </div>
 
             {/* Right Side - Questions */}
