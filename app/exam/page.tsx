@@ -7,8 +7,8 @@ import { Card } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { Clock, User, LogOut, AlertTriangle, Loader2 } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Clock, User, LogOut, AlertTriangle, Loader2, CheckCircle } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import WebcamMonitor from "@/components/exam/WebcamMonitor"
 
 // Sample questions
@@ -58,6 +58,10 @@ export default function ExamPage() {
   const [startExamDialog, setStartExamDialog] = useState(true)
   const [faceDetectionReady, setFaceDetectionReady] = useState(false)
   const [examStarted, setExamStarted] = useState(false)
+  const [examCompleted, setExamCompleted] = useState(false)
+  const [examScore, setExamScore] = useState(0)
+  const [resultsDialog, setResultsDialog] = useState(false)
+  const [cameraOff, setCameraOff] = useState(false)
   
   // Define logCheatingAttempt first before any useEffect hooks
   const logCheatingAttempt = useCallback((message: string) => {
@@ -83,7 +87,7 @@ export default function ExamPage() {
   
   // Anti-cheating: Timer countdown
   useEffect(() => {
-    if (examStarted && timeLeft > 0) {
+    if (examStarted && timeLeft > 0 && !examCompleted) {
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -98,7 +102,7 @@ export default function ExamPage() {
       
       return () => clearInterval(timer)
     }
-  }, [examStarted, timeLeft])
+  }, [examStarted, timeLeft, examCompleted])
   
   // Handle face detection readiness
   const handleFaceDetectionReady = (ready: boolean) => {
@@ -107,16 +111,18 @@ export default function ExamPage() {
   
   // Handle face detection status from WebcamMonitor
   const handleFaceDetectionStatus = (faceDetected: boolean, multipleFaces: boolean, faceCount: number) => {
-    if (!faceDetected) {
-      logCheatingAttempt("No face detected in frame")
-      setWarning("Your face must be visible during the exam")
-      setWarningDialog(true)
-    }
-    
-    if (multipleFaces) {
-      logCheatingAttempt(`Multiple faces detected in frame (${faceCount} faces)`)
-      setWarning(`${faceCount} faces detected. Only your face should be visible during the exam.`)
-      setWarningDialog(true)
+    if (!examCompleted) {
+      if (!faceDetected) {
+        logCheatingAttempt("No face detected in frame")
+        setWarning("Your face must be visible during the exam")
+        setWarningDialog(true)
+      }
+      
+      if (multipleFaces) {
+        logCheatingAttempt(`Multiple faces detected in frame (${faceCount} faces)`)
+        setWarning(`${faceCount} faces detected. Only your face should be visible during the exam.`)
+        setWarningDialog(true)
+      }
     }
   }
   
@@ -139,8 +145,20 @@ export default function ExamPage() {
     }
   }
   
+  // Return to home page
+  const handleReturnHome = () => {
+    router.push("/")
+  }
+  
   // Submit exam
   const handleSubmit = () => {
+    // Stop timer
+    setExamCompleted(true)
+    
+    // Turn off camera
+    setCameraOff(true)
+    
+    // Calculate score
     let score = 0
     Object.keys(selectedAnswers).forEach((questionIndex) => {
       const index = parseInt(questionIndex)
@@ -148,6 +166,9 @@ export default function ExamPage() {
         score++
       }
     })
+    
+    // Save score
+    setExamScore(score)
     
     // Prepare results
     const results = {
@@ -160,9 +181,8 @@ export default function ExamPage() {
     
     console.log("Exam results:", results)
     
-    // Show score and navigate back to login
-    alert(`Exam completed! Your score: ${score}/${questions.length}`)
-    router.push("/")
+    // Show results dialog
+    setResultsDialog(true)
   }
   
   // Format time as MM:SS
@@ -213,6 +233,39 @@ export default function ExamPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Results Dialog */}
+      <Dialog open={resultsDialog} onOpenChange={setResultsDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-green-600">
+              <CheckCircle className="mr-2 h-5 w-5" /> Exam Completed
+            </DialogTitle>
+            <DialogDescription>
+              <div className="mt-4 text-center">
+                <div className="text-4xl font-bold mb-2">{examScore}/{questions.length}</div>
+                <div className="text-sm text-gray-500">Your final score</div>
+                
+                {warningCount > 0 && (
+                  <div className="mt-4 text-sm text-amber-500 bg-amber-50 p-3 rounded">
+                    <AlertTriangle className="inline-block mr-1 h-4 w-4" />
+                    {warningCount} warning{warningCount !== 1 ? 's' : ''} were recorded during your exam.
+                  </div>
+                )}
+                
+                <div className="mt-4">
+                  Thank you for completing the exam. Your camera has been turned off.
+                </div>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={handleReturnHome} className="w-full">
+              Return to Home
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Pre-exam face detection setup screen */}
       {!startExamDialog && !examStarted && (
         <div className="min-h-screen flex flex-col">
@@ -238,6 +291,7 @@ export default function ExamPage() {
                   onFaceDetectionStatus={handleFaceDetectionStatus} 
                   onFaceDetectionReady={handleFaceDetectionReady}
                   isActive={!startExamDialog} 
+                  stopCamera={cameraOff}
                 />
                 
                 <div className="bg-gray-100 p-4 rounded-lg">
@@ -303,6 +357,7 @@ export default function ExamPage() {
                 onFaceDetectionStatus={handleFaceDetectionStatus} 
                 onFaceDetectionReady={handleFaceDetectionReady}
                 isActive={!startExamDialog} 
+                stopCamera={cameraOff}
               />
 
               <Card>

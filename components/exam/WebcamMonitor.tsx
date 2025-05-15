@@ -7,9 +7,15 @@ interface WebcamMonitorProps {
   onFaceDetectionStatus: (detected: boolean, multipleFaces: boolean, faceCount: number) => void;
   onFaceDetectionReady: (ready: boolean) => void;
   isActive: boolean;
+  stopCamera?: boolean;
 }
 
-export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionReady, isActive }: WebcamMonitorProps) {
+export default function WebcamMonitor({ 
+  onFaceDetectionStatus, 
+  onFaceDetectionReady, 
+  isActive,
+  stopCamera = false
+}: WebcamMonitorProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [cameraActive, setCameraActive] = useState(false)
@@ -46,6 +52,19 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
     }
   }, [])
 
+  // Stop camera when stopCamera prop changes to true
+  useEffect(() => {
+    if (stopCamera && videoRef.current && videoRef.current.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
+      tracks.forEach(track => track.stop())
+      videoRef.current.srcObject = null
+      setCameraActive(false)
+      setFaceDetectionReady(false)
+      setInitialCheckDone(false)
+      console.log('Camera stopped')
+    }
+  }, [stopCamera])
+
   // Clean up camera on component unmount
   useEffect(() => {
     return () => {
@@ -58,10 +77,10 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
 
   // Initialize camera when component mounts or becomes active
   useEffect(() => {
-    if (isActive && !cameraActive) {
+    if (isActive && !cameraActive && !stopCamera) {
       startCamera()
     }
-  }, [isActive, cameraActive])
+  }, [isActive, cameraActive, stopCamera])
 
   // Load models when face-api is loaded and camera is active
   useEffect(() => {
@@ -83,7 +102,7 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
   // Start webcam
   const startCamera = async () => {
     try {
-      if (!videoRef.current) return
+      if (!videoRef.current || stopCamera) return
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -129,13 +148,13 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
   
   // Start face detection loop
   useEffect(() => {
-    if (!faceDetectionReady || !cameraActive || !videoRef.current || !canvasRef.current) return
+    if (!faceDetectionReady || !cameraActive || !videoRef.current || !canvasRef.current || stopCamera) return
     
     const faceapi = (window as any).faceapi
     if (!faceapi) return
     
     const checkFace = async () => {
-      if (!videoRef.current || !canvasRef.current) return
+      if (!videoRef.current || !canvasRef.current || stopCamera) return
       
       try {
         const options = new faceapi.TinyFaceDetectorOptions({
@@ -220,7 +239,7 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
     checkFace()
     
     return () => clearInterval(faceDetectionInterval)
-  }, [faceDetectionReady, cameraActive, onFaceDetectionStatus, initialCheckDone])
+  }, [faceDetectionReady, cameraActive, onFaceDetectionStatus, initialCheckDone, stopCamera])
   
   return (
     <Card className="overflow-hidden">
@@ -240,12 +259,12 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
           height="480"
           className="absolute h-full w-full object-cover"
         />
-        {!cameraActive && (
+        {!cameraActive && !stopCamera && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
             Starting camera...
           </div>
         )}
-        {cameraActive && !faceDetectionReady && (
+        {cameraActive && !faceDetectionReady && !stopCamera && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
             <div className="text-center">
               <div className="animate-pulse mb-3">Loading face detection models...</div>
@@ -253,14 +272,19 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
             </div>
           </div>
         )}
-        {faceDetectionReady && !initialCheckDone && (
+        {faceDetectionReady && !initialCheckDone && !stopCamera && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
             Initializing face detection...
           </div>
         )}
-        {multipleFaces && (
+        {multipleFaces && !stopCamera && (
           <div className="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-sm font-bold">
             {faceCount} faces detected!
+          </div>
+        )}
+        {stopCamera && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
+            Camera turned off
           </div>
         )}
       </div>
@@ -268,9 +292,15 @@ export default function WebcamMonitor({ onFaceDetectionStatus, onFaceDetectionRe
         <div className="flex justify-between">
           <div>Your face must be the only one visible during the exam</div>
           <div>
-            {!faceDetectionReady && <span className="text-amber-500">Loading face detection...</span>}
-            {faceDetectionReady && !initialCheckDone && <span className="text-amber-500">Initializing...</span>}
-            {faceDetectionReady && initialCheckDone && <span className="text-green-500">Face tracking active</span>}
+            {!stopCamera ? (
+              <>
+                {!faceDetectionReady && <span className="text-amber-500">Loading face detection...</span>}
+                {faceDetectionReady && !initialCheckDone && <span className="text-amber-500">Initializing...</span>}
+                {faceDetectionReady && initialCheckDone && <span className="text-green-500">Face tracking active</span>}
+              </>
+            ) : (
+              <span className="text-gray-500">Face tracking disabled</span>
+            )}
           </div>
         </div>
       </div>
