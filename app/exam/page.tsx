@@ -381,14 +381,10 @@ export default function ExamPage() {
       exitFullscreen()
     }
     
-    // Calculate score
-    let score = 0
-    Object.keys(selectedAnswers).forEach((questionIndex) => {
-      const index = parseInt(questionIndex)
-      if (selectedAnswers[index] === questions[index].answer) {
-        score++
-      }
-    })
+    // Calculate score (iterate over questions to avoid key mismatches)
+    const score = questions.reduce((total, q, i) => {
+      return total + (selectedAnswers[i] === q.answer ? 1 : 0)
+    }, 0)
     
     // Save score
     setExamScore(score)
