@@ -65,6 +65,8 @@ export default function ExamPage() {
   const [lastVisibilityState, setLastVisibilityState] = useState("")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [fullscreenExitAttempts, setFullscreenExitAttempts] = useState(0)
+  const [studentName, setStudentName] = useState("")
+  const [submitting, setSubmitting] = useState(false)
   
   // Define logCheatingAttempt first before any useEffect hooks
   const logCheatingAttempt = useCallback((message: string) => {
@@ -168,6 +170,11 @@ export default function ExamPage() {
   // Actually start the exam (called when face detection is ready)
   const startExam = () => {
     if (!faceDetectionReady) {
+      return
+    }
+    if (!studentName.trim()) {
+      setWarning("Please enter your name to start the exam")
+      setWarningDialog(true)
       return
     }
     // Enter fullscreen mode before starting exam
@@ -388,6 +395,7 @@ export default function ExamPage() {
     
     // Prepare results
     const results = {
+      studentName: studentName.trim(),
       score,
       totalQuestions: questions.length,
       cheatingLogs,
@@ -397,6 +405,22 @@ export default function ExamPage() {
     }
     
     console.log("Exam results:", results)
+
+    // Send to backend (fire-and-forget)
+    ;(async () => {
+      try {
+        setSubmitting(true)
+        await fetch('/api/exams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(results)
+        })
+      } catch (e) {
+        console.error('Failed to submit results', e)
+      } finally {
+        setSubmitting(false)
+      }
+    })()
     
     // Show results dialog
     setResultsDialog(true)
@@ -434,8 +458,19 @@ export default function ExamPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="studentName">Your Name</Label>
+              <input
+                id="studentName"
+                type="text"
+                value={studentName}
+                onChange={(e) => setStudentName(e.target.value)}
+                placeholder="Enter your full name"
+                className="border rounded px-3 py-2"
+              />
+            </div>
             <div className="flex items-center gap-4">
-              <Button onClick={prepareExam} className="w-full">
+              <Button onClick={prepareExam} className="w-full" disabled={!studentName.trim()}>
                 Prepare Exam
               </Button>
             </div>
@@ -493,7 +528,7 @@ export default function ExamPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={handleReturnHome} className="w-full">
+            <Button onClick={handleReturnHome} className="w-full" disabled={submitting}>
               Return to Home
             </Button>
           </DialogFooter>
